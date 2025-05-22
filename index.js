@@ -84,7 +84,7 @@ app.post('/login', async (req, res) => {
 
     try {
         // Find the user by username
-        const userResult = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+        const userResult = await pool.query('SELECT Id, UserName, password, Email, Rol, SuperUser FROM users WHERE username = $1', [username]);
 
         if (userResult.rows.length === 0) {
             return res.status(401).json({ message: 'Usuario no se encuentra registrado.' });
@@ -111,7 +111,9 @@ app.post('/login', async (req, res) => {
                              user: {
                                 id: user.id,
                                 username: user.username,
-                                email: user.email}});
+                                email: user.email,
+                                rol: user.rol,
+                                superuser: user.superuser}});
 
     } catch (error) {
         console.error('Error during login:', error);
@@ -129,5 +131,5 @@ app.post('/logout', authenticateToken, (req, res) => {
 
 // Start the server
 app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+    console.log(`Server running on port3 ${port}`);
 });
