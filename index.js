@@ -43,18 +43,18 @@ app.post('/register', async (req, res) => {
 
     // Basic validation
     if (!username || !email || !password) {
-        return res.status(400).json({ message: 'All fields are required.' });
+        return res.status(400).json({ message: 'Usuario, correo y conraseña son datos requeridos para el registro' });
     }
 
     if (password.length < 8) {
-        return res.status(400).json({ message: 'Password must be at least 8 characters long.' });
+        return res.status(400).json({ message: 'La contraseña debe tener al menos 8 caracteres' });
     }
 
     try {
         // Check if email already exists
         const emailCheck = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
         if (emailCheck.rows.length > 0) {
-            return res.status(400).json({ message: 'Email already registered.' });
+            return res.status(400).json({ message: 'Email ya se encuentra registrado' });
         }
 
         // Hash the password
@@ -66,11 +66,11 @@ app.post('/register', async (req, res) => {
             [username, email, hashedPassword]
         );
 
-        res.status(201).json({ message: 'User registered successfully.', user: newUser.rows[0] });
+        res.status(201).json({ message: 'Usuario registrado exitosamente', user: newUser.rows[0] });
 
     } catch (error) {
         console.error('Error during registration:', error);
-        res.status(500).json({ message: 'An error occurred during registration.' });
+        res.status(500).json({ message: 'Ha ocurrido un error el registro' });
     }
 });
 
@@ -79,7 +79,7 @@ app.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
-        return res.status(400).json({ message: 'Username and password are required.' });
+        return res.status(400).json({ message: 'Usuario y contraseña son datos obligatorios' });
     }
 
     try {
@@ -87,7 +87,7 @@ app.post('/login', async (req, res) => {
         const userResult = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
 
         if (userResult.rows.length === 0) {
-            return res.status(401).json({ message: 'Invalid username or password.' });
+            return res.status(401).json({ message: 'Usuario no se encuentra registrado.' });
         }
 
         const user = userResult.rows[0];
@@ -96,7 +96,7 @@ app.post('/login', async (req, res) => {
         const passwordMatch = await bcrypt.compare(password, user.password);
 
         if (!passwordMatch) {
-            return res.status(401).json({ message: 'Invalid username or password.' });
+            return res.status(401).json({ message: 'Contraseña incorecta.' });
         }
 
         // Generate a JWT for session management
@@ -106,11 +106,16 @@ app.post('/login', async (req, res) => {
             { expiresIn: '1h' } // Token expires in 1 hour
         );
 
-        res.status(200).json({ message: 'Login successful.', token });
+        res.status(200).json({ message: 'Sessión iniciada exitosamente.',
+                                token,
+                             user: {
+                                id: user.id,
+                                username: user.username,
+                                email: user.email}});
 
     } catch (error) {
         console.error('Error during login:', error);
-        res.status(500).json({ message: 'An error occurred during login.' });
+        res.status(500).json({ message: 'Ha ocurrido un error al iniciar sesión' });
     }
 });
 
@@ -118,7 +123,7 @@ app.post('/login', async (req, res) => {
 app.post('/logout', authenticateToken, (req, res) => {
     // For JWTs, server-side logout is often just a confirmation.
     // The client is responsible for discarding the token.
-    res.status(200).json({ message: 'Logged out successfully.' });
+    res.status(200).json({ message: 'Sessión cerrada exitosamente.' });
 });
 
 
