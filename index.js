@@ -154,7 +154,7 @@ app.post('/seasons', authenticateToken, async (req, res) => {
 // Listar todas las seasons
 app.get('/seasons', async (req, res) => {
     try {
-        const result = await pool.query('SELECT id, name, date_ini FROM seasons ORDER BY date_ini DESC');
+        const result = await pool.query('SELECT id, name, date_ini FROM seasons ORDER BY date_ini ASC');
         
         res.status(200).json({
             message: 'Seasons retrieved successfully.',
@@ -221,7 +221,7 @@ app.get('/games', async (req, res) => {
         }
         
         // Ordenar por id (más recientes primero)
-        query += ` ORDER BY g.id DESC`;
+        query += ` ORDER BY g.id ASC`;
         
         const result = await pool.query(query, params);
         
@@ -293,6 +293,166 @@ app.post('/games', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Error creando el juego:', error);
         res.status(500).json({ message: 'Ha ocurrido un error al crear el juego.' });
+    }
+});
+
+// Crear un nuevo registro de datos ofensivos de jugador en un juego
+app.post('/offensive-player-data', authenticateToken, async (req, res) => {
+    const { 
+        id_season, 
+        id_game, 
+        id_player, 
+        vb, 
+        hit, 
+        "2b": doubles, 
+        "3b": triples, 
+        hr, 
+        bb, 
+        kk 
+    } = req.body;
+
+    // Validación básica de campos requeridos
+    const requiredFields = ['id_season', 'id_game', 'id_player', 'vb', 'hit', '2b', '3b', 'hr', 'bb', 'kk'];
+    const missingFields = requiredFields.filter(field => {
+        // Manejo especial para campos con nombres que son palabras reservadas
+        if (field === '2b') return doubles === undefined;
+        if (field === '3b') return triples === undefined;
+        return req.body[field] === undefined;
+    });
+
+    if (missingFields.length > 0) {
+        return res.status(400).json({ 
+            message: `Missing required fields: ${missingFields.join(', ')}` 
+        });
+    }
+
+    // Validar que todos los campos numéricos sean enteros no negativos
+    const numericFields = ['vb', 'hit', '2b', '3b', 'hr', 'bb', 'kk'];
+    const invalidFields = numericFields.filter(field => {
+        let value;
+        if (field === '2b') value = doubles;
+        else if (field === '3b') value = triples;
+        else value = req.body[field];
+        
+        return !Number.isInteger(value) || value < 0;
+    });
+
+    if (invalidFields.length > 0) {
+        return res.status(400).json({ 
+            message: `Invalid values for fields: ${invalidFields.join(', ')}. Must be non-negative integers.` 
+        });
+    }
+
+    try {
+        // Verificar que la temporada existe
+        const seasonCheck = await pool.query('SELECT id FROM seasons WHERE id = $1', [id_season]);
+        if (seasonCheck.rows.length === 0) {
+            return res.status(404).json({ message: 'Season not found.' });
+        }
+
+        // Verificar que el juego existe
+        const gameCheck = await pool.query('SELECT id FROM games WHERE id = $1', [id_game]);
+        if (gameCheck.rows.length === 0) {
+            return res.status(404).json({ message: 'Game not found.' });
+        }
+
+        // Verificar que el jugador existe
+        const playerCheck = await pool.query('SELECT id FROM users WHERE id = $1', [id_player]);
+        if (playerCheck.rows.length === 0) {
+            return res.status(404).json({ message: 'Player not found.' });
+        }
+
+        // Verificar si ya existe un registro para este jugador en este juego
+        const existingCheck = await pool.query(
+            'SELECT id FROM offensive_player_data_games WHERE id_game = $1 AND id_player = $2',
+            [id_game, id_player]
+        );
+
+        if (existingCheck.rows.length > 0) {
+            return res.status(409).json({ 
+                message: 'A record for this player in this game already exists. Use PUT to update it.',
+                record_id: existingCheck.rows[0].id
+            });
+        }
+
+        // Insertar el nuevo registro
+        const result = await pool.query(
+            `INSERT INTO offensive_player_data_games 
+            (id_season, id_game, id_player, vb, hit, "2b", "3b", hr, bb, kk) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+            RETURNING id, id_season, id_game, id_player, vb, hit, "2b" as "doubles", "3b" as "triples", hr, bb, kk, created_at, updated_at`,
+            [id_season, id_game, id_player, vb, hit, doubles, triples, hr, bb, kk]
+        );
+
+        res.status(201).json({
+            message: 'Offensive player data created successfully.',
+            data: result.rows[0]
+        });
+    } catch (error) {
+        console.error('Error creating offensive player data:', error);
+        res.status(500).json({ message: 'An error occurred while creating offensive player data.' });
+    }
+});
+
+// Listar datos ofensivos de jugadores con filtros opcionales
+app.get('/offensive-player-data', async (req, res) => {
+    try {
+        // Construir la consulta base
+        let query = `
+            SELECT 
+                t1.id, 
+                t1.id_season, 
+                t1.id_game, 
+                t1.vb, 
+                t1.hit, 
+                t1."2b", 
+                t1."3b", 
+                t1.hr, 
+                t1.bb, 
+                t1.kk,
+                t2.username as player_name
+            FROM offensive_player_data_games t1, users t2
+            WHERE t1.id_player = t2.id
+        `;
+        
+        const params = [];
+        let paramIndex = 1;
+        
+        // Filtrar por id_season si se proporciona
+        if (req.query.id_season) {
+            query += ` AND t1.id_season = $${paramIndex}`;
+            params.push(req.query.id_season);
+            paramIndex++;
+        }
+        
+        // Filtrar por id_game si se proporciona
+        if (req.query.id_game) {
+            query += ` AND t1.id_game = $${paramIndex}`;
+            params.push(req.query.id_game);
+            paramIndex++;
+        }
+        
+        // Filtrar por id_player si se proporciona
+        if (req.query.id_player) {
+            query += ` AND t1.id_player = $${paramIndex}`;
+            params.push(req.query.id_player);
+            paramIndex++;
+        }
+        
+        // Ordenar por fecha de actualización (más recientes primero)
+        query += ` ORDER BY t1.updated_at DESC`;
+        
+        // Ejecutar la consulta
+        const result = await pool.query(query, params);
+        
+        res.status(200).json({
+            message: 'Offensive player data retrieved successfully.',
+            count: result.rows.length,
+            data: result.rows
+        });
+    } catch (error) {
+        console.error('Error retrieving offensive player data:', error);
+        res.status(500).json({ message: 'An error occurred while retrieving offensive player data.' });
     }
 });
 
