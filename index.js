@@ -456,6 +456,92 @@ app.get('/offensive-player-data', async (req, res) => {
     }
 });
 
+// Consultar estadísticas ofensivas por torneo (temporada)
+app.get('/offensive-stats-by-season/:id_season', async (req, res) => {
+    const { id_season } = req.params;
+    
+    // Validar que id_season sea un número
+    if (!id_season || isNaN(parseInt(id_season))) {
+        return res.status(400).json({ message: 'Valid id_season parameter is required.' });
+    }
+    
+    try {
+        // Verificar que la temporada existe
+        const seasonCheck = await pool.query('SELECT id FROM seasons WHERE id = $1', [id_season]);
+        if (seasonCheck.rows.length === 0) {
+            return res.status(404).json({ message: 'Season not found.' });
+        }
+        
+        // Ejecutar la consulta con el filtro de id_season
+        const query = `
+            SELECT *
+            FROM (
+                SELECT 
+                    tot.id_season, 
+                    tot.season_name, 
+                    tot.id_player, 
+                    tot.player_name, 
+                    tot.tot_vb, 
+                    tot.tot_hits, 
+                    tot.tot_2b, 
+                    tot.tot_3b, 
+                    tot.tot_hr, 
+                    tot.tot_bb, 
+                    tot.tot_k,
+                    TO_CHAR(
+                        (tot.tot_hits + tot.tot_2b + tot.tot_3b + tot.tot_hr)::decimal / NULLIF(tot.tot_vb, 0), 
+                        'FM0.000'
+                    ) AS avg
+                FROM (
+                    SELECT 
+                        t1.id_season, 
+                        t3.name AS season_name, 
+                        t1.id_player, 
+                        t2.username AS player_name, 
+                        SUM(t1.vb) AS tot_vb, 
+                        SUM(t1.hit) AS tot_hits, 
+                        SUM(t1."2b") AS tot_2b, 
+                        SUM(t1."3b") AS tot_3b, 
+                        SUM(t1.hr) AS tot_hr, 
+                        SUM(t1.bb) AS tot_bb, 
+                        SUM(t1.kk) AS tot_k
+                    FROM 
+                        offensive_player_data_games t1, 
+                        users t2, 
+                        seasons t3, 
+                        games t4
+                    WHERE 
+                        t1.id_player = t2.id
+                        AND t1.id_season = t3.id
+                        AND t1.id_game = t4.id
+                        AND t1.id_season = $1
+                    GROUP BY 
+                        t1.id_season, t3.name, t1.id_player, t2.username
+                ) AS tot
+            )
+            ORDER BY tot_vb DESC, avg DESC
+        `;
+        
+        const result = await pool.query(query, [id_season]);
+        
+        // Obtener información de la temporada
+        const seasonInfo = await pool.query(
+            'SELECT id, name, date_ini FROM seasons WHERE id = $1',
+            [id_season]
+        );
+        
+        res.status(200).json({
+            message: 'Offensive statistics retrieved successfully.',
+            count: result.rows.length,
+            season: seasonInfo.rows[0],
+            stats: result.rows
+        });
+    } catch (error) {
+        console.error('Error retrieving offensive statistics:', error);
+        res.status(500).json({ message: 'An error occurred while retrieving offensive statistics.' });
+    }
+});
+
 // Start the server
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
